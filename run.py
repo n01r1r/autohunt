@@ -37,7 +37,7 @@ from pathlib import Path
 
 def load_contract(p: Path) -> dict:
     text = p.read_text(encoding="utf-8")
-    if p.suffix == ".json":
+    if p.suffix.lower() == ".json":
         return json.loads(text)
     try:
         import yaml
@@ -56,7 +56,8 @@ def numeric(cmd: str | None, cwd: Path) -> float | None:
     if not cmd:
         return None
     out = subprocess.run(cmd, shell=True, cwd=str(cwd),
-                         capture_output=True, text=True)
+                         capture_output=True, text=True,
+                         encoding="utf-8", errors="replace")
     for line in reversed(out.stdout.strip().splitlines()):
         try:
             return float(line.strip())
@@ -98,7 +99,11 @@ def run_contract(contract_path: Path, cwd: Path) -> str:
     prog = c.get("progress") or {}
     prog_cmd = prog.get("command")
     window = int(prog.get("stagnation_window", 2))
+    if window < 1:
+        sys.exit("REFUSED: progress.stagnation_window must be >= 1.")
     direction = (c.get("goal") or {}).get("direction", "decrease")
+    if direction not in ("increase", "decrease"):
+        sys.exit(f"REFUSED: goal.direction must be 'increase' or 'decrease', got {direction!r}.")
     fp = c.get("failure_policy") or {}
 
     state_rel = (c.get("state") or {}).get("file", "harness/state/decisions.jsonl")

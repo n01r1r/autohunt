@@ -64,9 +64,16 @@ def main() -> int:
         sys.exit("no prompt given")
     name = pick()
     argv = build(name, prompt)
-    # Windows: agent CLIs are usually .cmd/.bat shims (npm), which CreateProcess
-    # won't launch without a shell. shell=True lets cmd.exe resolve via PATHEXT.
-    return subprocess.run(argv, shell=(os.name == "nt")).returncode
+    prog = shutil.which(argv[0]) or argv[0]
+    argv = [prog, *argv[1:]]
+    # A .cmd/.bat shim (npm-installed CLIs on Windows) can't be launched by
+    # CreateProcess directly, so it needs a shell. Resolve the program first so
+    # .exe backends (and all POSIX backends) run shell-free and are immune to
+    # metacharacter parsing. Only true batch shims fall back to the shell.
+    # ponytail: cmd.exe still parses % & | < > in the prompt for .cmd backends
+    # on Windows; keep prompts plain there, or use an .exe backend, if that bites.
+    is_shim = os.name == "nt" and str(prog).lower().endswith((".cmd", ".bat"))
+    return subprocess.run(argv, shell=is_shim).returncode
 
 
 if __name__ == "__main__":

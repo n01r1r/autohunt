@@ -27,7 +27,7 @@ import tempfile
 from pathlib import Path
 
 from run import run_contract
-from agent import build
+from agent import AGENTS, build
 
 ROOT = Path(__file__).resolve().parent
 RUN_PY = ROOT / "run.py"
@@ -102,7 +102,7 @@ def part_b_one(name: str) -> str:
 
 def part_b() -> None:
     ran = False
-    for name in ("claude", "gemini", "codex", "aider", "llm"):
+    for name in AGENTS:                     # single source of truth: agent.py
         if not shutil.which(name):
             print(f"part B  {name:8} SKIP (not on PATH)")
             continue

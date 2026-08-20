@@ -132,6 +132,7 @@ python run.py --selftest            # winnable -> WON; unwinnable -> stops at ca
 python test_agnostic.py             # Part A: runtime drives an arbitrary backend
 python test_governor.py             # resume across crash, classify logic, refusal gates
 python test_setup.py                # behind() silent on non-repo / no-upstream / offline
+python test_cli.py                  # CLI contract validation + scaffold entry points
 python test_agnostic.py --live      # + Part B: smoke-test installed real agents (costs tokens)
 ```
 

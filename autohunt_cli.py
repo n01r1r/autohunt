@@ -36,7 +36,9 @@ def validate_contract(path: Path, cwd: Path) -> list[str]:
         return [f"cannot load contract: {exc}"]
     if not isinstance(c, dict):
         return ["contract root must be a mapping"]
-    mode = c.get("goal", {}).get("mode", "threshold")
+    mode = c.get("goal", {}).get("mode", "complete")
+    if mode not in ("complete", "improve"):   # run.py is the authority on the enum
+        errors.append("goal.mode must be 'complete' or 'improve'")
     if mode != "improve" and not c.get("success", {}).get("command"):
         errors.append("success.command is required unless goal.mode=improve")
     if mode == "improve" and not c.get("progress", {}).get("command"):

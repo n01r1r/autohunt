@@ -28,6 +28,19 @@ def main() -> int:
         valid["state"] = {"file": "../escape.jsonl"}
         path.write_text(json.dumps(valid), encoding="utf-8")
         assert any("state.file" in e for e in validate_contract(path, root))
+
+        # mode vocabulary must match run.py's authority: validate has to reject
+        # what run_contract would REFUSE, or it hands a false PASS to the user.
+        bad_mode = {"goal": {"mode": "threshold"},
+                    "success": {"command": "x"}, "budget": {"attempts": 1}}
+        path.write_text(json.dumps(bad_mode), encoding="utf-8")
+        assert any("goal.mode" in e for e in validate_contract(path, root)), \
+            "unknown mode must fail validate (run.py would REFUSE it)"
+
+        improve_no_prog = {"goal": {"mode": "improve"}, "budget": {"attempts": 1}}
+        path.write_text(json.dumps(improve_no_prog), encoding="utf-8")
+        assert any("progress.command" in e for e in validate_contract(path, root)), \
+            "improve mode needs progress.command"
     print("test_cli ok")
     return 0
 

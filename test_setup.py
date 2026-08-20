@@ -4,7 +4,7 @@
 Covers the states a deployed machine actually hits: not a repo, a repo with no
 upstream, and a repo whose remote is unreachable (offline). A reachable-and-
 behind clone is exercised manually (needs network); the advisory line itself
-is one print in setup.py.
+is one print in the legacy setup helper.
 
 Usage:
     python test_setup.py
@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from setup import behind
+from update_check import behind
 
 
 def _git(root: Path, *args: str) -> None:

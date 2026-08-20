@@ -38,7 +38,7 @@ Loop is NOT hand-written. Write a contract; the generic runtime derives it:
     / regressing? rollback / budget out? escalate
 
 Run a contract (governor never calls a model; it runs maker + deterministic check):
-    python run.py harness/contracts/<x>.contract.yaml
+    autohunt run harness/contracts/<x>.contract.yaml
 
 Autonomous: it runs to the budget cap unattended and escalates to a human only
 on an `unknown` verdict (invalid/missing signal) or `tampered` (the maker
@@ -68,9 +68,8 @@ non_goals:
 """,
     "harness/contracts/example.contract.yaml": """# One CompletionContract per repeated task. The runtime builds the loop from this.
 # You write these blocks; you do NOT write a loop body.
-# Script paths are absolute (baked in at scaffold time) so the contract works
-# when the harness scripts live in a separate clone (clone-reference deploy).
-# Run it FROM THIS PROJECT'S ROOT:  python "__HARNESS_ROOT__/run.py" harness/contracts/example.contract.yaml
+# Install autohunt once, then contracts remain portable across clone locations.
+# Run FROM THIS PROJECT'S ROOT: autohunt run harness/contracts/example.contract.yaml
 
 goal:
   metric: rmse
@@ -81,12 +80,12 @@ goal:
 
 maker:                       # ONE attempt of work. A SEPARATE process (maker != checker).
   # agent-agnostic: agent.py picks the backend from HARNESS_AGENT / routing/agent.env / PATH.
-  command: "python \\"__HARNESS_ROOT__/agent.py\\" 'read harness/state/goal.yaml; make one fix toward the goal'"
+  command: "autohunt-agent 'read harness/state/goal.yaml; make one fix toward the goal'"
   timeout_sec: 600           # hung maker = process tree killed, exit 124 recorded, loop continues
   # git no-op detection: have the maker commit each attempt, then use commit
   # count as the progress metric (goal.direction: increase). An attempt that
   # changes nothing repeats the count -> classify() flags stagnation -> replan.
-  # command: "python \\"__HARNESS_ROOT__/agent.py\\" '...' && git add -A && git commit -qm attempt || true"
+  # command: "autohunt-agent '...'"
 
 success:                     # WHO decides done. Deterministic > model self-eval. exit 0 = pass.
   command: "python eval.py --check-threshold"
@@ -109,14 +108,14 @@ budget:                      # move #2 kill switch. attempts is a HARD cap.
   # wall_time_min: 30
 
 failure_policy:              # verdict -> action: continue | replan | rollback | escalate
-  regression: rollback
+  regression: replan          # rollback is opt-in; prefer an isolated worktree
   stagnation: replan
   unknown: escalate          # ambiguous signal -> human (tampered escalates by default)
   # NOTE: snapshot/rollback must NEVER touch harness/state - the ledger has to
   # survive resets or resume (durable state) breaks. Hence the exclude pathspec.
   # (double quotes: single-quoted args break under Windows cmd.exe)
-  snapshot_command: "git add -A -- . \\":(exclude)harness/state\\" && git commit -qm snapshot || true"   # runs at baseline + every new best
-  rollback_command: "git checkout -- . \\":(exclude)harness/state\\""   # restore the incumbent best (last snapshot)
+  # snapshot_command: "..."   # opt in only after reviewing its write scope
+  # rollback_command: "..."   # never enable broad checkout on a dirty worktree
   # Autonomy envelope: run on a dedicated branch (e.g. hunt/<tag>) so snapshot
   # and rollback resets stay scoped there. This contract IS the operator's
   # pre-authorization for exactly these commands - nothing broader.
@@ -187,9 +186,6 @@ Every failure -> freeze as a locked eval so no future change silently regresses 
 
 
 def scaffold(target: Path) -> tuple[list[str], list[str]]:
-    # Bake the scripts' real location into generated files so contracts work
-    # when the target project is not the clone (clone-reference deploy).
-    root = Path(__file__).resolve().parent.as_posix()
     created, skipped = [], []
     for rel, body in FILES.items():
         path = target / rel
@@ -197,7 +193,7 @@ def scaffold(target: Path) -> tuple[list[str], list[str]]:
             skipped.append(rel)
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(body.replace("__HARNESS_ROOT__", root), encoding="utf-8")
+        path.write_text(body, encoding="utf-8")
         created.append(rel)
     return created, skipped
 
@@ -209,9 +205,8 @@ def _selftest() -> None:
         created, skipped = scaffold(root)
         assert len(created) == len(FILES) and not skipped, "first run should create all"
         contract = (root / "harness/contracts/example.contract.yaml").read_text(encoding="utf-8")
-        assert "__HARNESS_ROOT__" not in contract, "placeholder must be substituted"
-        assert Path(__file__).resolve().parent.as_posix() in contract, \
-            "contract must reference the scripts' real location (clone-reference deploy)"
+        assert "autohunt-agent" in contract, "contract must use the stable CLI entry point"
+        assert str(Path(__file__).resolve().parent) not in contract, "contract must not bake in clone paths"
         created2, skipped2 = scaffold(root)
         assert not created2 and len(skipped2) == len(FILES), "re-run must not overwrite"
     print("selftest ok")

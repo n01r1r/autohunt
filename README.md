@@ -53,16 +53,18 @@ best metric beat the baseline.
 ## Quickstart
 
 ```bash
-python setup.py                 # scaffold harness/, detect an agent CLI, seed config
+python -m pip install -e /path/to/autohunt
+autohunt init . --agent codex   # scaffold harness/ and select a backend
 # edit harness/state/goal.yaml            (the invariant)
 # edit harness/contracts/example.contract.yaml  (maker / success / progress)
-python run.py harness/contracts/example.contract.yaml
+autohunt validate harness/contracts/example.contract.yaml
+autohunt run harness/contracts/example.contract.yaml
 ```
 
 Pick a backend explicitly if you want:
 
 ```bash
-HARNESS_AGENT=codex python run.py harness/contracts/example.contract.yaml
+HARNESS_AGENT=codex autohunt run harness/contracts/example.contract.yaml
 ```
 
 YAML contracts need `pyyaml` (`pip install pyyaml`); `.json` contracts need nothing.
@@ -88,7 +90,8 @@ Two different jobs bring an agent here — know which one you're doing:
 | `run.py` | deterministic governor / checker. Never calls a model. Kill switch, maker≠checker, durable resume. |
 | `agent.py` | the agnostic seam. One prompt in, the chosen agent CLI runs it headless. |
 | `scaffold.py` | writes the `harness/` template (never overwrites; safe to re-run). |
-| `setup.py` | scaffold + detect an agent + seed `agent.env` in one shot. |
+| `autohunt_cli.py` | stable `init` / `doctor` / `validate` / `run` entry point. |
+| `pyproject.toml` | installs the stable CLI entry points and YAML dependency. |
 | `harness/contracts/*.yaml` | one CompletionContract per task: goal / success / progress / budget / failure_policy. |
 | `harness/state/` | externalized memory: decisions + rejected paths, so a fresh session never rediscovers a dead end. |
 | `harness/principles/` | canonical, host-agnostic rules. Host adapters generate from here. |
@@ -107,8 +110,7 @@ Point host adapters (skill dirs, AGENTS.md references) at the clone instead of
 copying files out of it.
 
 - **Am I stale?** `git fetch -q && git rev-list --count HEAD..origin/main` —
-  prints commits behind; `0` = current. `setup.py` prints this advisory
-  automatically when the scripts live in a clone.
+  prints commits behind; `0` = current.
 - **Update:** `git pull --ff-only`. Local edits make the ff fail — that IS the
   "not cleanly updatable" signal; resolve by hand.
 - **Never mid-run:** the governor never checks or updates itself while a

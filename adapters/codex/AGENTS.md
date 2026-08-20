@@ -7,10 +7,8 @@ This file only teaches Codex how to drive it.
 
 To install it in a target project, copy this file into the project's
 `AGENTS.md`, or reference its contents from an existing `AGENTS.md`. Keep the
-harness scripts (`scaffold.py`, `run.py`, `agent.py`, and `setup.py`) reachable
-in a **clone of the harness repository** (a clone stays updatable with
-`git pull --ff-only`; see the harness README "Updating deployed copies"). Use
-paths relative to wherever those scripts live.
+`autohunt` CLI installed from a **clone of the harness repository** (the clone
+stays updatable with `git pull --ff-only`; see the harness README).
 
 ## How to run
 
@@ -18,9 +16,8 @@ Scaffolding is deterministic. Run the script; do not hand-write the generated
 files.
 
 ```bash
-python setup.py [target_dir]     # scaffold + detect an agent CLI + seed config
-# or, files only:
-python scaffold.py [target_dir]
+autohunt doctor [target_dir]
+autohunt init [target_dir] --agent codex
 ```
 
 - With no `target_dir`, the scripts scaffold into the current working directory.
@@ -46,12 +43,11 @@ process through `agent.py`, checks the result with a deterministic command,
 classifies progress, stagnation, or regression, enforces the budget cap, and
 appends durable state so an interrupted run can resume.
 
-Run it from the target project's root, with `run.py` addressed in the clone
-(scaffolded contracts already carry the clone's absolute script paths, baked
-in at scaffold time):
+Run it from the target project's root after validating the contract:
 
 ```bash
-python <clone>/run.py harness/contracts/<x>.contract.yaml
+autohunt validate harness/contracts/<x>.contract.yaml
+autohunt run harness/contracts/<x>.contract.yaml
 ```
 
 `harness/routing/agent.env` resolves against the maker's working directory --

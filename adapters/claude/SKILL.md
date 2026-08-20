@@ -10,12 +10,13 @@ itself does not depend on Claude — the runtime never calls a model, and the
 agent backend is chosen from `$HARNESS_AGENT` / `harness/routing/agent.env` /
 `PATH`. This file just teaches Claude Code how to drive it.
 
-To install as a skill, **clone the repo and link this folder** — do not copy
+To install as a skill, **clone the repo, install its CLI, and link this folder** — do not copy
 files out of the clone (a clone stays updatable with `git pull --ff-only`; see
 README "Updating deployed copies"):
 
 ```bash
 git clone https://github.com/n01r1r/autohunt.git ~/tools/autohunt
+python -m pip install -e ~/tools/autohunt
 # POSIX:
 ln -s ~/tools/autohunt/adapters/claude ~/.claude/skills/harness-init
 ```
@@ -26,13 +27,12 @@ New-Item -ItemType Junction -Path "$env:USERPROFILE\.claude\skills\harness-init"
 ```
 
 The skill content then IS the clone's `adapters/claude/` — `git pull` in the
-clone updates the installed skill with no re-copy. Invoke the harness scripts
-by the clone path you chose at install (do NOT address them through the link
-with `..` — path traversal resolves lexically and escapes the junction).
+clone updates the installed skill with no re-copy. Invoke the stable `autohunt`
+command; generated contracts do not contain the clone's absolute path.
 Verify the install:
 
 ```bash
-python ~/tools/autohunt/run.py --selftest
+autohunt doctor
 ```
 
 ## How to run
@@ -40,9 +40,7 @@ python ~/tools/autohunt/run.py --selftest
 Scaffolding is deterministic — run the script, do not hand-write the files.
 
 ```bash
-python setup.py [target_dir]     # scaffold + detect an agent CLI + seed config
-# or, files only:
-python scaffold.py [target_dir]
+autohunt init [target_dir] --agent claude
 ```
 
 - No `target_dir` → scaffolds into the current working directory.
@@ -57,12 +55,11 @@ contracts. It never calls a model. It runs the maker (a separate process via
 progress vs stagnation vs regression, enforces the budget cap, and appends
 durable state so a crashed run resumes.
 
-Run it **from the target project's root**, with `run.py` addressed in the
-clone (scaffolded contracts already carry the clone's absolute script paths,
-baked in at scaffold time):
+Run it from the target project's root after validating the contract:
 
 ```bash
-python <clone>/run.py harness/contracts/<x>.contract.yaml
+autohunt validate harness/contracts/<x>.contract.yaml
+autohunt run harness/contracts/<x>.contract.yaml
 ```
 
 `harness/routing/agent.env` resolves against the maker's working directory —

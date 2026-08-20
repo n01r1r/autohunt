@@ -72,6 +72,8 @@ def part_a() -> None:
     assert build("gemini", "hi") == ["gemini", "-p", "hi"]
     assert build("codex", "hi") == ["codex", "exec", "--skip-git-repo-check", "hi"]
     assert build("mycli --flag", "hi") == ["mycli", "--flag", "hi"]   # raw command prefix
+    assert build('"C:\\my tools\\cli.exe" --flag', "hi") == \
+        ["C:\\my tools\\cli.exe", "--flag", "hi"]   # quoted path with spaces (Windows)
     print("part A2 ok  (agent.py dispatch is generic across backends)")
 
 

@@ -17,6 +17,7 @@ Usage:  python agent.py "<prompt>"     (or pipe the prompt on stdin)
 """
 from __future__ import annotations
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -55,7 +56,9 @@ def pick() -> str:
 def build(name: str, prompt: str) -> list[str]:
     if name in AGENTS:
         return AGENTS[name](prompt)
-    return [*name.split(), prompt]          # raw command prefix
+    # raw command prefix; posix=False keeps Windows backslashes intact and
+    # groups "quoted paths with spaces" into one token (quotes then stripped)
+    return [*(t.strip('"') for t in shlex.split(name, posix=False)), prompt]
 
 
 def main() -> int:

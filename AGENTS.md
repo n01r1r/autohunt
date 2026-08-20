@@ -31,8 +31,10 @@ trusts the checkable artifact (exit code, metric, test), not your write-up.
 ## Autonomy
 
 The governor runs to the budget cap unattended. It escalates to a human only on
-an `unknown` verdict. Do not ask a human for routine progress, stagnation, or
-regression — those are handled by continue / replan / rollback.
+an `unknown` verdict (invalid/missing signal) or `tampered` (a `protect:`-listed
+file changed under the maker — never edit the checker or eval scripts). Do not
+ask a human for routine progress, plateau, stagnation, or regression — those
+are handled by continue / replan / rollback.
 
 ## Cost habits
 

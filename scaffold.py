@@ -41,8 +41,11 @@ Run a contract (governor never calls a model; it runs maker + deterministic chec
     python run.py harness/contracts/<x>.contract.yaml
 
 Autonomous: it runs to the budget cap unattended and escalates to a human only
-on an `unknown` verdict. principles/operating-policy.md = the cost moves that
-are host habits (MCP audit, cache prefix order, effort dial), not code.
+on an `unknown` verdict (invalid/missing signal) or `tampered` (the maker
+edited a `protect:`-listed file). A metric tie is `plateau`/`stagnation`,
+handled by continue/replan - never a human question. Hung commands are
+tree-killed at `timeout_sec`. principles/operating-policy.md = the cost moves
+that are host habits (MCP audit, cache prefix order, effort dial), not code.
 """,
     "harness/state/goal.yaml": """# What this run must achieve. The invariant the agent must not drift from.
 goal: ""            # e.g. "reduce val RMSE below 0.04"
@@ -72,10 +75,14 @@ non_goals:
 goal:
   metric: rmse
   direction: decrease        # or increase
+  # mode: improve            # no done-threshold: hunt the best metric until the
+                             # budget ends (progress.command required; the run
+                             # exits IMPROVED if best beat the baseline).
 
 maker:                       # ONE attempt of work. A SEPARATE process (maker != checker).
   # agent-agnostic: agent.py picks the backend from HARNESS_AGENT / routing/agent.env / PATH.
   command: "python \\"__HARNESS_ROOT__/agent.py\\" 'read harness/state/goal.yaml; make one fix toward the goal'"
+  timeout_sec: 600           # hung maker = process tree killed, exit 124 recorded, loop continues
   # git no-op detection: have the maker commit each attempt, then use commit
   # count as the progress metric (goal.direction: increase). An attempt that
   # changes nothing repeats the count -> classify() flags stagnation -> replan.
@@ -83,11 +90,18 @@ maker:                       # ONE attempt of work. A SEPARATE process (maker !=
 
 success:                     # WHO decides done. Deterministic > model self-eval. exit 0 = pass.
   command: "python eval.py --check-threshold"
+  timeout_sec: 120
 
 progress:                    # success vs progress are separate. 3->3->3 is stagnation.
-  command: "python eval.py --print-metric"   # prints ONE number to stdout
+  command: "python eval.py --print-metric"   # prints ONE finite number (NaN/inf rejected)
   # command: "git rev-list --count HEAD"     # pairs with the committing maker above
+  timeout_sec: 120
   stagnation_window: 2
+  # The governor measures this ONCE before the first maker run (attempt 0 =
+  # baseline), then compares every attempt against the incumbent best.
+
+protect:                     # checker integrity: the maker may not edit its own judge.
+  - eval.py                  # hashed before/after each maker run; change -> tampered -> escalate
 
 budget:                      # move #2 kill switch. attempts is a HARD cap.
   attempts: 6
@@ -97,9 +111,15 @@ budget:                      # move #2 kill switch. attempts is a HARD cap.
 failure_policy:              # verdict -> action: continue | replan | rollback | escalate
   regression: rollback
   stagnation: replan
-  unknown: escalate          # the ONLY path back to a human: ambiguous signal
-  rollback_command: "git checkout -- ."
-  # rollback_command: "git reset --hard HEAD~1"   # pairs with the committing maker
+  unknown: escalate          # ambiguous signal -> human (tampered escalates by default)
+  # NOTE: snapshot/rollback must NEVER touch harness/state - the ledger has to
+  # survive resets or resume (durable state) breaks. Hence the exclude pathspec.
+  # (double quotes: single-quoted args break under Windows cmd.exe)
+  snapshot_command: "git add -A -- . \\":(exclude)harness/state\\" && git commit -qm snapshot || true"   # runs at baseline + every new best
+  rollback_command: "git checkout -- . \\":(exclude)harness/state\\""   # restore the incumbent best (last snapshot)
+  # Autonomy envelope: run on a dedicated branch (e.g. hunt/<tag>) so snapshot
+  # and rollback resets stay scoped there. This contract IS the operator's
+  # pre-authorization for exactly these commands - nothing broader.
 """,
     "harness/routing/executors.yaml": """# Bind each semantic op to the cheapest sufficient executor.
 # Numbers/metrics/thresholds = deterministic. Model only for judgment.

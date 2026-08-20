@@ -73,6 +73,7 @@ YAML contracts need `pyyaml` (`pip install pyyaml`); `.json` contracts need noth
 python scaffold.py --selftest       # create-all + no-overwrite-on-rerun
 python run.py --selftest            # winnable -> WON; unwinnable -> stops at cap
 python test_agnostic.py             # Part A: runtime drives an arbitrary backend
+python test_governor.py             # resume across crash, classify logic, refusal gates
 python test_agnostic.py --live      # + Part B: smoke-test installed real agents (costs tokens)
 ```
 

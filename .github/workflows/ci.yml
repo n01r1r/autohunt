@@ -24,3 +24,5 @@ jobs:
         run: python run.py --selftest
       - name: agent-agnostic proof (no agent needed)
         run: python test_agnostic.py
+      - name: governor guarantees (resume, classify, gates)
+        run: python test_governor.py

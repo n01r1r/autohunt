@@ -7,10 +7,10 @@ This file only teaches Codex how to drive it.
 
 To install it in a target project, copy this file into the project's
 `AGENTS.md`, or reference its contents from an existing `AGENTS.md`. Keep the
-harness scripts (`scaffold.py`, `run.py`, `agent.py`, and `setup.py`) reachable:
-either check out the whole harness repository and run them from there, or copy
-the scripts alongside the target project. Use paths relative to wherever those
-scripts live.
+harness scripts (`scaffold.py`, `run.py`, `agent.py`, and `setup.py`) reachable
+in a **clone of the harness repository** (a clone stays updatable with
+`git pull --ff-only`; see the harness README "Updating deployed copies"). Use
+paths relative to wherever those scripts live.
 
 ## How to run
 

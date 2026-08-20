@@ -10,11 +10,12 @@ itself does not depend on Claude — the runtime never calls a model, and the
 agent backend is chosen from `$HARNESS_AGENT` / `harness/routing/agent.env` /
 `PATH`. This file just teaches Claude Code how to drive it.
 
-To install as a skill, copy this folder to `~/.claude/skills/harness-init/`
-**and** keep the harness scripts (`scaffold.py`, `run.py`, `agent.py`,
-`setup.py`) reachable — either check out the whole repo and run from there, or
-copy the scripts alongside. Then invoke the commands below with paths relative
-to wherever the scripts live.
+To install as a skill, **clone the repo** (do not copy files out of it — a
+clone stays updatable with `git pull --ff-only`; see README "Updating deployed
+copies") and point `~/.claude/skills/harness-init/` at this folder, or copy it
+there and keep the harness scripts (`scaffold.py`, `run.py`, `agent.py`,
+`setup.py`) reachable in the clone. Invoke the commands below with paths
+relative to wherever the scripts live.
 
 ## How to run
 

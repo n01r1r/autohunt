@@ -8,6 +8,7 @@ Usage:  python setup.py [target_dir]
 """
 from __future__ import annotations
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -20,6 +21,23 @@ def detect() -> str | None:
         if shutil.which(name):
             return name
     return None
+
+
+def behind(root: Path) -> int | None:
+    """Commits behind upstream, if these scripts live in a git clone.
+
+    None = unknown (not a clone, no upstream, offline) - stay silent then.
+    Advisory only, at setup time; the governor never checks or updates itself
+    mid-run (network dependence + code swap would break resume determinism).
+    """
+    try:
+        subprocess.run(["git", "fetch", "-q"], cwd=root, timeout=15,
+                       capture_output=True)
+        out = subprocess.run(["git", "rev-list", "--count", "HEAD..@{u}"],
+                             cwd=root, timeout=15, capture_output=True, text=True)
+        return int(out.stdout.strip()) if out.returncode == 0 else None
+    except Exception:
+        return None
 
 
 def active_agent(env_file: Path) -> str | None:
@@ -52,6 +70,12 @@ def main() -> int:
         print(f"  detected agent: {agent}  (wrote harness/routing/agent.env)")
     else:
         print("  no known agent CLI on PATH; set HARNESS_AGENT before a real maker runs")
+
+    root = Path(__file__).resolve().parent
+    n = behind(root)
+    if n:
+        print(f"  note: harness scripts are {n} commit(s) behind upstream - "
+              f"update with: git -C \"{root}\" pull --ff-only")
 
     print("\nnext:")
     print("  1. edit harness/state/goal.yaml         (the invariant)")

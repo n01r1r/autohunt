@@ -67,6 +67,34 @@ YAML contracts need `pyyaml` (`pip install pyyaml`); `.json` contracts need noth
 | `harness/principles/` | canonical, host-agnostic rules. Host adapters generate from here. |
 | `adapters/<host>/` | host adapters: `claude/` (Claude Code skill), `codex/` (Codex AGENTS.md, live-verified: drove a contract to WON). |
 
+## Updating deployed copies
+
+Deploy as a **git clone**, not file copies — git is the version system, so no
+custom update machinery exists or is needed:
+
+```bash
+git clone https://github.com/n01r1r/autohunt.git ~/tools/autohunt
+```
+
+Point host adapters (skill dirs, AGENTS.md references) at the clone instead of
+copying files out of it.
+
+- **Am I stale?** `git fetch -q && git rev-list --count HEAD..origin/main` —
+  prints commits behind; `0` = current. `setup.py` prints this advisory
+  automatically when the scripts live in a clone.
+- **Update:** `git pull --ff-only`. Local edits make the ff fail — that IS the
+  "not cleanly updatable" signal; resolve by hand.
+- **Never mid-run:** the governor never checks or updates itself while a
+  contract runs — network dependence and code swap under a running loop would
+  break resume determinism. Check at setup/session start; update on human
+  trigger only.
+- Per-project `harness/` files (goal.yaml, contracts, state) are local state
+  the user edits — never update targets. Only scripts + adapters version-track.
+
+If a file-copy deployment is unavoidable, stamp it at copy time
+(`git rev-parse HEAD > .version`) and compare against
+`git ls-remote https://github.com/n01r1r/autohunt.git HEAD` — no clone needed.
+
 ## Test
 
 ```bash

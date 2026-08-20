@@ -26,3 +26,5 @@ jobs:
         run: python test_agnostic.py
       - name: governor guarantees (resume, classify, gates)
         run: python test_governor.py
+      - name: behind() edge cases (non-repo, no-upstream, offline)
+        run: python test_setup.py

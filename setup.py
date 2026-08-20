@@ -31,8 +31,10 @@ def behind(root: Path) -> int | None:
     mid-run (network dependence + code swap would break resume determinism).
     """
     try:
-        subprocess.run(["git", "fetch", "-q"], cwd=root, timeout=15,
-                       capture_output=True)
+        fetched = subprocess.run(["git", "fetch", "-q"], cwd=root, timeout=15,
+                                 capture_output=True)
+        if fetched.returncode != 0:      # offline / no remote: a count against
+            return None                  # stale refs would mislead - stay silent
         out = subprocess.run(["git", "rev-list", "--count", "HEAD..@{u}"],
                              cwd=root, timeout=15, capture_output=True, text=True)
         return int(out.stdout.strip()) if out.returncode == 0 else None

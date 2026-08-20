@@ -10,12 +10,28 @@ itself does not depend on Claude — the runtime never calls a model, and the
 agent backend is chosen from `$HARNESS_AGENT` / `harness/routing/agent.env` /
 `PATH`. This file just teaches Claude Code how to drive it.
 
-To install as a skill, **clone the repo** (do not copy files out of it — a
-clone stays updatable with `git pull --ff-only`; see README "Updating deployed
-copies") and point `~/.claude/skills/harness-init/` at this folder, or copy it
-there and keep the harness scripts (`scaffold.py`, `run.py`, `agent.py`,
-`setup.py`) reachable in the clone. Invoke the commands below with paths
-relative to wherever the scripts live.
+To install as a skill, **clone the repo and link this folder** — do not copy
+files out of the clone (a clone stays updatable with `git pull --ff-only`; see
+README "Updating deployed copies"):
+
+```bash
+git clone https://github.com/n01r1r/autohunt.git ~/tools/autohunt
+# POSIX:
+ln -s ~/tools/autohunt/adapters/claude ~/.claude/skills/harness-init
+```
+
+```powershell
+# Windows (junction; no admin rights needed):
+New-Item -ItemType Junction -Path "$env:USERPROFILE\.claude\skills\harness-init" -Target "$env:USERPROFILE\tools\autohunt\adapters\claude"
+```
+
+The skill directory then sits **inside the clone**, so the harness scripts are
+always two levels up from this file (`../../run.py` etc.) — self-locating, no
+per-machine paths in this document. Verify the install:
+
+```bash
+python ~/.claude/skills/harness-init/../../run.py --selftest
+```
 
 ## How to run
 
@@ -39,9 +55,16 @@ contracts. It never calls a model. It runs the maker (a separate process via
 progress vs stagnation vs regression, enforces the budget cap, and appends
 durable state so a crashed run resumes.
 
+Run it **from the target project's root**, with `run.py` addressed in the
+clone (scaffolded contracts already carry the clone's absolute script paths,
+baked in at scaffold time):
+
 ```bash
-python run.py harness/contracts/<x>.contract.yaml
+python <clone>/run.py harness/contracts/<x>.contract.yaml
 ```
+
+`harness/routing/agent.env` resolves against the maker's working directory —
+the target project — so it is target-project state, never clone state.
 
 Needs `pyyaml` for YAML contracts (or write the contract as `.json`).
 

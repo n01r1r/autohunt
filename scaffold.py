@@ -56,13 +56,18 @@ non_goals:
     "harness/routing/agent.env": """# Which agent backend agent.py drives. Uncomment / edit one line.
 # Overridden by the $HARNESS_AGENT environment variable if set.
 # A value that is not a known name is run verbatim as a command prefix.
+# Resolved against the maker's working directory - i.e. THIS project's
+# harness/routing/agent.env, because run.py runs the maker with cwd = the
+# target project. This file is target-project state, not clone state.
 # HARNESS_AGENT=claude
 # HARNESS_AGENT=gemini
 # HARNESS_AGENT=codex
 """,
     "harness/contracts/example.contract.yaml": """# One CompletionContract per repeated task. The runtime builds the loop from this.
 # You write these blocks; you do NOT write a loop body.
-# Run it:  python run.py harness/contracts/example.contract.yaml
+# Script paths are absolute (baked in at scaffold time) so the contract works
+# when the harness scripts live in a separate clone (clone-reference deploy).
+# Run it FROM THIS PROJECT'S ROOT:  python "__HARNESS_ROOT__/run.py" harness/contracts/example.contract.yaml
 
 goal:
   metric: rmse
@@ -70,11 +75,11 @@ goal:
 
 maker:                       # ONE attempt of work. A SEPARATE process (maker != checker).
   # agent-agnostic: agent.py picks the backend from HARNESS_AGENT / routing/agent.env / PATH.
-  command: "python agent.py 'read harness/state/goal.yaml; make one fix toward the goal'"
+  command: "python \\"__HARNESS_ROOT__/agent.py\\" 'read harness/state/goal.yaml; make one fix toward the goal'"
   # git no-op detection: have the maker commit each attempt, then use commit
   # count as the progress metric (goal.direction: increase). An attempt that
   # changes nothing repeats the count -> classify() flags stagnation -> replan.
-  # command: "python agent.py '...' && git add -A && git commit -qm attempt || true"
+  # command: "python \\"__HARNESS_ROOT__/agent.py\\" '...' && git add -A && git commit -qm attempt || true"
 
 success:                     # WHO decides done. Deterministic > model self-eval. exit 0 = pass.
   command: "python eval.py --check-threshold"
@@ -162,6 +167,9 @@ Every failure -> freeze as a locked eval so no future change silently regresses 
 
 
 def scaffold(target: Path) -> tuple[list[str], list[str]]:
+    # Bake the scripts' real location into generated files so contracts work
+    # when the target project is not the clone (clone-reference deploy).
+    root = Path(__file__).resolve().parent.as_posix()
     created, skipped = [], []
     for rel, body in FILES.items():
         path = target / rel
@@ -169,7 +177,7 @@ def scaffold(target: Path) -> tuple[list[str], list[str]]:
             skipped.append(rel)
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(body, encoding="utf-8")
+        path.write_text(body.replace("__HARNESS_ROOT__", root), encoding="utf-8")
         created.append(rel)
     return created, skipped
 
@@ -180,7 +188,10 @@ def _selftest() -> None:
         root = Path(d)
         created, skipped = scaffold(root)
         assert len(created) == len(FILES) and not skipped, "first run should create all"
-        assert (root / "harness/contracts/example.contract.yaml").read_text(encoding="utf-8")
+        contract = (root / "harness/contracts/example.contract.yaml").read_text(encoding="utf-8")
+        assert "__HARNESS_ROOT__" not in contract, "placeholder must be substituted"
+        assert Path(__file__).resolve().parent.as_posix() in contract, \
+            "contract must reference the scripts' real location (clone-reference deploy)"
         created2, skipped2 = scaffold(root)
         assert not created2 and len(skipped2) == len(FILES), "re-run must not overwrite"
     print("selftest ok")

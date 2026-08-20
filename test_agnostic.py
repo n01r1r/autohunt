@@ -101,9 +101,16 @@ def part_b_one(name: str) -> str:
 
 
 def part_b() -> None:
+    # Version axis: HARNESS_SMOKE_EXTRA adds raw backend prefixes, one per
+    # comma, e.g. "npx -y @openai/codex@2.1.0 exec --skip-git-repo-check".
+    # agent.py runs an unknown name verbatim as a command prefix, so any
+    # pinned CLI version is testable without code changes. Backends are
+    # independent (one maker per contract) - a list, never a cross product.
+    extra = [s.strip() for s in
+             os.environ.get("HARNESS_SMOKE_EXTRA", "").split(",") if s.strip()]
     ran = False
-    for name in AGENTS:                     # single source of truth: agent.py
-        if not shutil.which(name):
+    for name in [*AGENTS, *extra]:          # single source of truth: agent.py
+        if not shutil.which(name.split()[0]):
             print(f"part B  {name:8} SKIP (not on PATH)")
             continue
         ran = True

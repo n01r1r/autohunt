@@ -46,9 +46,16 @@ process through `agent.py`, checks the result with a deterministic command,
 classifies progress, stagnation, or regression, enforces the budget cap, and
 appends durable state so an interrupted run can resume.
 
+Run it from the target project's root, with `run.py` addressed in the clone
+(scaffolded contracts already carry the clone's absolute script paths, baked
+in at scaffold time):
+
 ```bash
-python run.py harness/contracts/<x>.contract.yaml
+python <clone>/run.py harness/contracts/<x>.contract.yaml
 ```
+
+`harness/routing/agent.env` resolves against the maker's working directory --
+the target project -- so it is target-project state, never clone state.
 
 YAML contracts require `pyyaml`; a contract may instead be written as JSON.
 

@@ -65,7 +65,7 @@ YAML contracts need `pyyaml` (`pip install pyyaml`); `.json` contracts need noth
 | `harness/contracts/*.yaml` | one CompletionContract per task: goal / success / progress / budget / failure_policy. |
 | `harness/state/` | externalized memory: decisions + rejected paths, so a fresh session never rediscovers a dead end. |
 | `harness/principles/` | canonical, host-agnostic rules. Host adapters generate from here. |
-| `adapters/claude/` | example host adapter (install as a Claude Code skill). |
+| `adapters/<host>/` | host adapters: `claude/` (Claude Code skill), `codex/` (Codex AGENTS.md), `gemini/` (Gemini CLI GEMINI.md). |
 
 ## Test
 

@@ -25,12 +25,14 @@ ln -s ~/tools/autohunt/adapters/claude ~/.claude/skills/harness-init
 New-Item -ItemType Junction -Path "$env:USERPROFILE\.claude\skills\harness-init" -Target "$env:USERPROFILE\tools\autohunt\adapters\claude"
 ```
 
-The skill directory then sits **inside the clone**, so the harness scripts are
-always two levels up from this file (`../../run.py` etc.) — self-locating, no
-per-machine paths in this document. Verify the install:
+The skill content then IS the clone's `adapters/claude/` — `git pull` in the
+clone updates the installed skill with no re-copy. Invoke the harness scripts
+by the clone path you chose at install (do NOT address them through the link
+with `..` — path traversal resolves lexically and escapes the junction).
+Verify the install:
 
 ```bash
-python ~/.claude/skills/harness-init/../../run.py --selftest
+python ~/tools/autohunt/run.py --selftest
 ```
 
 ## How to run

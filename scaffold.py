@@ -71,12 +71,17 @@ goal:
 maker:                       # ONE attempt of work. A SEPARATE process (maker != checker).
   # agent-agnostic: agent.py picks the backend from HARNESS_AGENT / routing/agent.env / PATH.
   command: "python agent.py 'read harness/state/goal.yaml; make one fix toward the goal'"
+  # git no-op detection: have the maker commit each attempt, then use commit
+  # count as the progress metric (goal.direction: increase). An attempt that
+  # changes nothing repeats the count -> classify() flags stagnation -> replan.
+  # command: "python agent.py '...' && git add -A && git commit -qm attempt || true"
 
 success:                     # WHO decides done. Deterministic > model self-eval. exit 0 = pass.
   command: "python eval.py --check-threshold"
 
 progress:                    # success vs progress are separate. 3->3->3 is stagnation.
   command: "python eval.py --print-metric"   # prints ONE number to stdout
+  # command: "git rev-list --count HEAD"     # pairs with the committing maker above
   stagnation_window: 2
 
 budget:                      # move #2 kill switch. attempts is a HARD cap.
@@ -89,6 +94,7 @@ failure_policy:              # verdict -> action: continue | replan | rollback |
   stagnation: replan
   unknown: escalate          # the ONLY path back to a human: ambiguous signal
   rollback_command: "git checkout -- ."
+  # rollback_command: "git reset --hard HEAD~1"   # pairs with the committing maker
 """,
     "harness/routing/executors.yaml": """# Bind each semantic op to the cheapest sufficient executor.
 # Numbers/metrics/thresholds = deterministic. Model only for judgment.

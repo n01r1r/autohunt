@@ -177,12 +177,18 @@ def test_success_only_metricless_never_snapshots() -> None:
         assert not (root / "snap_calls").exists(), \
             "snapshot must never run on an unmeasured (metric-less) retry"
         recs = _records(root / "state.jsonl", tag)
+        progress = [r for r in recs if r.get("verdict") == "progress"]
+        assert len(progress) == 2, \
+            f"win_at=3 must yield exactly two metric-less progress retries, got {progress}"
         for r in recs:
             if r.get("verdict") == "progress":
                 assert r.get("metric") is None and r.get("incumbent") is False, \
                     f"metric-less progress must not be an incumbent: {r}"
             assert r.get("snapshot_status") in (None, "not_requested"), \
                 f"no snapshot should be requested for a metric-less run: {r}"
+        won = [r for r in recs if r.get("verdict") == "won"][-1]
+        assert won.get("metric") is None and won.get("incumbent") is False, \
+            f"a metric-less win must also be recorded non-incumbent: {won}"
     print("so-snapshot ok (metric-less retry never snapshots nor becomes incumbent)")
 
 

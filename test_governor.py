@@ -145,6 +145,47 @@ def test_success_only_retries_to_won() -> None:
     print("success-only ok (no progress cmd retries to WON, no premature escalate)")
 
 
+def test_success_only_metricless_never_snapshots() -> None:
+    """A metric-less 'progress' retry must not enter the snapshot/incumbent path.
+
+    Regression guard: classifying a no-progress non-passing attempt as 'progress'
+    must not make it a measured incumbent. With snapshot/rollback configured but
+    NO progress command, the snapshot must never run on the unmeasured retry
+    state, and no metric-less attempt may be recorded as an incumbent.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        _seed_counter(root, win_at=3)                # passes only at the 3rd run
+        # snapshot writes a sentinel; if it ever runs on a retry the file appears
+        (root / "snap.py").write_text(
+            "from pathlib import Path\n"
+            "p=Path('snap_calls'); p.write_text(str(int(p.read_text()) + 1) if p.exists() else '1')\n",
+            encoding="utf-8")
+        (root / "restore.py").write_text("pass\n", encoding="utf-8")
+        tag = "sosnap.json"
+        contract = {
+            "maker": {"command": f"{PY} inc.py"},
+            "success": {"command": f"{PY} check.py"},
+            "budget": {"attempts": 5},
+            "state": {"file": "state.jsonl"},
+            "failure_policy": {"snapshot_command": f"{PY} snap.py",
+                               "rollback_command": f"{PY} restore.py"},
+        }                                            # snapshot set, but no progress
+        cpath = root / tag
+        cpath.write_text(json.dumps(contract), encoding="utf-8")
+        assert run_contract(cpath, root) == "WON"
+        assert not (root / "snap_calls").exists(), \
+            "snapshot must never run on an unmeasured (metric-less) retry"
+        recs = _records(root / "state.jsonl", tag)
+        for r in recs:
+            if r.get("verdict") == "progress":
+                assert r.get("metric") is None and r.get("incumbent") is False, \
+                    f"metric-less progress must not be an incumbent: {r}"
+            assert r.get("snapshot_status") in (None, "not_requested"), \
+                f"no snapshot should be requested for a metric-less run: {r}"
+    print("so-snapshot ok (metric-less retry never snapshots nor becomes incumbent)")
+
+
 def test_checker_only_gate_escalates() -> None:
     """Checker-only contract (no maker, no progress) escalates on a failing gate.
 
@@ -768,6 +809,7 @@ def main() -> int:
     test_classify()
     test_numeric_rejects_nonfinite()
     test_success_only_retries_to_won()
+    test_success_only_metricless_never_snapshots()
     test_checker_only_gate_escalates()
     test_resume_continues()
     test_resume_respects_cap()

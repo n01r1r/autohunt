@@ -751,10 +751,14 @@ def run_contract(contract_path: Path, cwd: Path) -> str:
         default_action = "escalate" if verdict in ("unknown", "tampered") else "continue"
         action = "stop" if verdict == "won" else fp.get(verdict, default_action)
 
-        scored = verdict not in ("unknown", "tampered")
+        # A metric-less "progress" (a success-only retry with no progress command)
+        # is safe to retry but is NOT a measured incumbent: it must not advance
+        # history and must never enter the snapshot path, which exists solely to
+        # preserve a measured candidate.  Only a finite metric is an incumbent.
+        scored = verdict not in ("unknown", "tampered") and metric is not None
         snapshot_status = "not_requested"
         snapshot_exit = None
-        if verdict == "progress" and snap_cmd:
+        if verdict == "progress" and snap_cmd and metric is not None:
             # A prepare line is durable before the external snapshot runs.  A
             # later commit line is the only point at which this metric enters
             # history as an incumbent.  Resume escalates on a prepare without

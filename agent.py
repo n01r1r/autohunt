@@ -34,6 +34,23 @@ AGENTS = {
 }
 
 
+def tokenize_backend_command(name: str) -> list[str]:
+    """Tokenize a backend name/prefix exactly as the runtime will execute it."""
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("agent backend must be a non-empty string")
+    if name in AGENTS:
+        return [name]
+    try:
+        tokens = shlex.split(name, posix=False)
+    except ValueError as exc:
+        raise ValueError(f"invalid agent backend command: {exc}") from exc
+    if not tokens:
+        raise ValueError("agent backend must contain an executable")
+    # posix=False preserves Windows backslashes while retaining quoted paths;
+    # strip only the quote characters that delimit the executable token.
+    return [token.strip('"') for token in tokens]
+
+
 def pick() -> str:
     want = os.environ.get("HARNESS_AGENT", "").strip()
     if not want:
@@ -56,12 +73,13 @@ def pick() -> str:
 def build(name: str, prompt: str) -> list[str]:
     if name in AGENTS:
         return AGENTS[name](prompt)
-    # raw command prefix; posix=False keeps Windows backslashes intact and
-    # groups "quoted paths with spaces" into one token (quotes then stripped)
-    return [*(t.strip('"') for t in shlex.split(name, posix=False)), prompt]
+    return [*tokenize_backend_command(name), prompt]
 
 
 def main() -> int:
+    if sys.argv[1:] in (["--help"], ["-h"]):
+        print(__doc__)
+        return 0
     prompt = " ".join(sys.argv[1:]).strip() or sys.stdin.read().strip()
     if not prompt:
         sys.exit("no prompt given")

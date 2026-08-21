@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import argparse
-import json
 import shutil
 import sys
 from pathlib import Path
 
-from agent import AGENTS
-from run import load_contract, run_contract
+from agent import AGENTS, tokenize_backend_command
+from run import load_contract, run_contract, validate_contract as validate_loaded_contract
 from scaffold import scaffold
 
 
@@ -18,7 +17,8 @@ def _agents() -> list[str]:
 
 
 def _set_agent(target: Path, name: str) -> None:
-    if name not in AGENTS and not shutil.which(name.split()[0]):
+    tokens = tokenize_backend_command(name)
+    if name not in AGENTS and not shutil.which(tokens[0]):
         raise ValueError(f"agent backend is not available: {name}")
     path = target / "harness/routing/agent.env"
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
@@ -32,29 +32,9 @@ def validate_contract(path: Path, cwd: Path) -> list[str]:
     errors: list[str] = []
     try:
         c = load_contract(path)
-    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+    except Exception as exc:
         return [f"cannot load contract: {exc}"]
-    if not isinstance(c, dict):
-        return ["contract root must be a mapping"]
-    mode = c.get("goal", {}).get("mode", "complete")
-    if mode not in ("complete", "improve"):   # run.py is the authority on the enum
-        errors.append("goal.mode must be 'complete' or 'improve'")
-    if mode != "improve" and not c.get("success", {}).get("command"):
-        errors.append("success.command is required unless goal.mode=improve")
-    if mode == "improve" and not c.get("progress", {}).get("command"):
-        errors.append("progress.command is required for goal.mode=improve")
-    attempts = c.get("budget", {}).get("attempts")
-    if not isinstance(attempts, int) or attempts < 1:
-        errors.append("budget.attempts must be a positive integer")
-    state = Path(c.get("state", {}).get("file", "harness/state/decisions.jsonl"))
-    try:
-        (cwd / state).resolve().relative_to(cwd.resolve())
-    except ValueError:
-        errors.append("state.file must stay inside the target project")
-    for rel in c.get("protect", []):
-        if not (cwd / rel).exists():
-            errors.append(f"protected path does not exist: {rel}")
-    return errors
+    return validate_loaded_contract(c, cwd)
 
 
 def cmd_init(args: argparse.Namespace) -> int:

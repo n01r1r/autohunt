@@ -37,18 +37,33 @@ ACT -> VERIFY -> won? stop | progressing? act | stagnating? replan
 ```
 
 The only paths back to a human are an `unknown` verdict (invalid or missing
-signal — NaN/inf metrics are rejected, not scored) and `tampered` (the maker
-edited a `protect:`-listed file, i.e. its own judge). Routine progress,
-plateau, stagnation, and regression are handled by continue / replan /
-rollback — no check-ins, no approval prompts. Before the first attempt the
-governor records the pristine metric as a baseline; every attempt is compared
-against the incumbent best, `snapshot_command` checkpoints the baseline and
-each new best (so even an attempt-1 regression has a restore point), and
-`rollback_command` restores it. An `unknown`/`tampered` attempt's metric is
-untrusted and never advances the incumbent — including across a resume. Hung makers/checkers are tree-killed at
-`timeout_sec` (recorded as exit 124). `goal.mode: improve` runs a
-budget-terminated hunt with no done-threshold: the run exits `IMPROVED` if the
-best metric beat the baseline.
+signal — NaN/inf metrics are rejected, not scored), `tampered` (the maker
+edited a `protect:`-listed file, i.e. its own judge), and a failed or
+uncommitted snapshot. Routine progress, plateau, stagnation, and regression
+are handled by continue / replan / rollback — no check-ins, no approval
+prompts. Before the first attempt the governor records the pristine metric as
+a baseline; every attempt is compared against the incumbent best,
+`snapshot_command` checkpoints the baseline and each new best (so even an
+attempt-1 regression has a restore point), and `rollback_command` restores it.
+The snapshot uses a durable prepare/commit boundary: a candidate is only
+admitted as an incumbent after its snapshot succeeds. An `unknown`/`tampered`
+attempt's metric is untrusted and never advances the incumbent — including
+across a resume. Maker, checker, progress, snapshot, and rollback commands
+have finite defaults (600 seconds for makers, 120 seconds for the others) and
+are tree-killed at their resolved timeout (recorded as exit 124). An escalated
+`unknown`, `tampered`, snapshot failure, or rollback failure is a sticky
+terminal ledger state: a resume returns `ESCALATE` without rerunning the maker.
+`goal.mode: improve` runs a budget-terminated hunt with no done-threshold: the
+run exits `IMPROVED` if the best metric beat the baseline, and restores the
+last committed incumbent when snapshot/rollback commands are configured.
+
+Contracts are checked by one strict canonical validator shared by `validate`
+and the runtime. Unknown fields, misspelled failure actions, non-finite or
+non-positive timeouts, unsafe paths, and unpaired snapshot/rollback commands
+are rejected before a run starts. The state file is an owned JSONL ledger with
+a first-line autohunt header; filename-only or headerless legacy state is
+refused. Records carry the canonical contract path and hashes for exact resume
+identity, so changed contracts cannot reuse an old `WON` or attempt budget.
 
 ## Quickstart
 
@@ -133,6 +148,8 @@ python test_agnostic.py             # Part A: runtime drives an arbitrary backen
 python test_governor.py             # resume across crash, classify logic, refusal gates
 python test_setup.py                # behind() silent on non-repo / no-upstream / offline
 python test_cli.py                  # CLI contract validation + scaffold entry points
+python test_cli.py --installed-e2e   # installed CLI against an external path with spaces
+python -m pip wheel . --no-deps      # build artifact smoke test
 python test_agnostic.py --live      # + Part B: smoke-test installed real agents (costs tokens)
 ```
 

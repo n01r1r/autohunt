@@ -40,12 +40,15 @@ Loop is NOT hand-written. Write a contract; the generic runtime derives it:
 Run a contract (governor never calls a model; it runs maker + deterministic check):
     autohunt run harness/contracts/<x>.contract.yaml
 
-Autonomous: it runs to the budget cap unattended and escalates to a human only
-on an `unknown` verdict (invalid/missing signal) or `tampered` (the maker
-edited a `protect:`-listed file). A metric tie is `plateau`/`stagnation`,
-handled by continue/replan - never a human question. Hung commands are
-tree-killed at `timeout_sec`. principles/operating-policy.md = the cost moves
-that are host habits (MCP audit, cache prefix order, effort dial), not code.
+Autonomous: it runs to the budget cap unattended and escalates to a human on
+an `unknown`/`tampered` verdict or a failed/uncommitted snapshot. Escalated
+unknown/tampered/snapshot/rollback failures are sticky terminal states on
+resume. A metric tie is `plateau`/`stagnation`, handled by continue/replan -
+never a human question. Maker/checker/progress/snapshot/rollback commands have
+finite defaults and are tree-killed at their resolved timeout. State is an
+owned, headered JSONL ledger; headerless or filename-only legacy state is
+refused. principles/operating-policy.md = the cost moves that are host habits
+(MCP audit, cache prefix order, effort dial), not code.
 """,
     "harness/state/goal.yaml": """# What this run must achieve. The invariant the agent must not drift from.
 goal: ""            # e.g. "reduce val RMSE below 0.04"
@@ -54,7 +57,10 @@ constraints:        # explicit boundaries the agent must preserve
 non_goals:
   - ""
 """,
-    "harness/state/decisions.jsonl": "",
+    # The governor only resumes from ledgers it owns.  Seed the ownership
+    # header so a freshly scaffolded target passes the same preflight gate as
+    # an already-used target.
+    "harness/state/decisions.jsonl": '{"kind":"autohunt-ledger","version":1}\n',
     "harness/state/rejected_paths.jsonl": "",
     "harness/routing/agent.env": """# Which agent backend agent.py drives. Uncomment / edit one line.
 # Overridden by the $HARNESS_AGENT environment variable if set.

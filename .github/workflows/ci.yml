@@ -17,7 +17,13 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: install
-        run: pip install pyyaml
+        run: |
+          python -m pip install pyyaml
+          python -m pip install -e .
+      - name: installed entry points
+        run: |
+          autohunt --help
+          autohunt-agent --help
       - name: scaffold selftest
         run: python scaffold.py --selftest
       - name: runtime selftest
@@ -30,3 +36,7 @@ jobs:
         run: python test_setup.py
       - name: CLI contract validation + scaffold entry points
         run: python test_cli.py
+      - name: installed CLI deterministic external-target E2E
+        run: python test_cli.py --installed-e2e
+      - name: wheel build smoke
+        run: python -m pip wheel . --no-deps --wheel-dir wheelhouse

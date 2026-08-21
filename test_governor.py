@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 import sys
 
-from run import run_contract, classify, numeric, TIMEOUT_EXIT
+from run import run_contract, classify, numeric, TIMEOUT_EXIT, _identity, _ledger_header
 
 PY = f'"{sys.executable}"'
 
@@ -45,13 +45,27 @@ def _seed_counter(root: Path, win_at: int) -> None:
 
 
 def _records(state_file: Path, tag: str) -> list:
-    return [json.loads(l) for l in state_file.read_text(encoding="utf-8").splitlines()
-            if l.strip() and json.loads(l).get("contract") == tag]
+    return [record for line in state_file.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+            for record in [json.loads(line)]
+            if record.get("contract") == tag
+            and record.get("phase") != "snapshot_prepare"]
 
 
-def _write_state(state_file: Path, recs: list) -> None:
+def _write_state(state_file: Path, recs: list, contract_path: Path | None = None,
+                 contract: dict | None = None) -> None:
     state_file.parent.mkdir(parents=True, exist_ok=True)
-    state_file.write_text("".join(json.dumps(r) + "\n" for r in recs), encoding="utf-8")
+    identity = _identity(contract_path, contract) if contract_path and contract else None
+    prepared = []
+    for rec in recs:
+        item = dict(rec)
+        if identity:
+            item["identity"] = identity
+            item.update(identity)
+        prepared.append(item)
+    header = json.dumps(_ledger_header(), separators=(",", ":")) + "\n"
+    state_file.write_text(header + "".join(json.dumps(r) + "\n" for r in prepared),
+                          encoding="utf-8")
 
 
 # ---- classify: the pure decision logic -------------------------------------
@@ -112,10 +126,6 @@ def test_resume_continues() -> None:
         (root / "n.txt").write_text("2", encoding="utf-8")           # 2 increments already happened
         tag = "resume.json"
         state = root / "state.jsonl"
-        _write_state(state, [                                         # what the dead process flushed
-            {"contract": tag, "attempt": 1, "verdict": "progress", "metric": 1.0, "action": "continue"},
-            {"contract": tag, "attempt": 2, "verdict": "progress", "metric": 2.0, "action": "continue"},
-        ])
         contract = {
             "goal": {"direction": "increase"},
             "maker": {"command": f"{PY} inc.py"},
@@ -126,6 +136,10 @@ def test_resume_continues() -> None:
         }
         cpath = root / tag
         cpath.write_text(json.dumps(contract), encoding="utf-8")
+        _write_state(state, [                                         # what the dead process flushed
+            {"contract": tag, "attempt": 1, "verdict": "progress", "metric": 1.0, "action": "continue"},
+            {"contract": tag, "attempt": 2, "verdict": "progress", "metric": 2.0, "action": "continue"},
+        ], cpath, contract)
 
         assert run_contract(cpath, root) == "WON", "resume must drive the counter to WON"
         assert (root / "n.txt").read_text() == "4", "maker must run only the 2 remaining attempts, not restart from 0"
@@ -142,17 +156,18 @@ def test_resume_respects_cap() -> None:
         root = Path(d)
         tag = "stuck.json"
         state = root / "state.jsonl"
-        _write_state(state, [
-            {"contract": tag, "attempt": 1, "verdict": "unknown", "metric": None, "action": "continue"},
-            {"contract": tag, "attempt": 2, "verdict": "unknown", "metric": None, "action": "continue"},
-        ])
         contract = {
             "success": {"command": f'{PY} -c "import sys; sys.exit(1)"'},
             "budget": {"attempts": 3},
             "state": {"file": "state.jsonl"},
+            "failure_policy": {"unknown": "continue"},
         }
         cpath = root / tag
         cpath.write_text(json.dumps(contract), encoding="utf-8")
+        _write_state(state, [
+            {"contract": tag, "attempt": 1, "verdict": "unknown", "metric": None, "action": "continue"},
+            {"contract": tag, "attempt": 2, "verdict": "unknown", "metric": None, "action": "continue"},
+        ], cpath, contract)
 
         assert run_contract(cpath, root) == "UNRESOLVED"
         assert len(_records(state, tag)) == 3, "cap=3 must hold across the resume (2 prior + 1 new)"
@@ -165,9 +180,6 @@ def test_resume_won_short_circuits() -> None:
         root = Path(d)
         tag = "done.json"
         state = root / "state.jsonl"
-        _write_state(state, [
-            {"contract": tag, "attempt": 1, "verdict": "won", "metric": None, "action": "stop"},
-        ])
         contract = {
             "maker": {"command": f"{PY} -c \"open('SENTINEL','w').close()\""},
             "success": {"command": f'{PY} -c "import sys; sys.exit(1)"'},
@@ -176,6 +188,9 @@ def test_resume_won_short_circuits() -> None:
         }
         cpath = root / tag
         cpath.write_text(json.dumps(contract), encoding="utf-8")
+        _write_state(state, [
+            {"contract": tag, "attempt": 1, "verdict": "won", "metric": None, "action": "stop"},
+        ], cpath, contract)
 
         assert run_contract(cpath, root) == "WON", "prior WON must short-circuit"
         assert not (root / "SENTINEL").exists(), "maker must not run once a prior WON is seen"
@@ -226,7 +241,7 @@ def test_timeout_kills_hung_maker() -> None:
         cpath = root / tag
         cpath.write_text(json.dumps(contract), encoding="utf-8")
         t0 = time.monotonic()
-        assert run_contract(cpath, root) == "UNRESOLVED"
+        assert run_contract(cpath, root) == "ESCALATE"
         assert time.monotonic() - t0 < 15, "timeout must bound the attempt, not sleep 30s"
         recs = _records(root / "state.jsonl", tag)
         assert recs[-1]["maker_exit"] == TIMEOUT_EXIT, "timeout must be recorded as exit 124"
@@ -264,18 +279,13 @@ def test_hung_checker_is_unknown() -> None:
 
 
 def test_improve_legacy_baseline() -> None:
-    """A pre-patch ledger (attempts but no attempt-0 baseline) must not lock
-    improve mode out of IMPROVED: the earliest metric stands in as baseline."""
+    """A ledger without a durable baseline is refused as legacy state."""
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
         _seed_counter(root, win_at=999)
         (root / "n.txt").write_text("6", encoding="utf-8")
         tag = "legacy.json"
         state = root / "state.jsonl"
-        _write_state(state, [    # legacy format: no baseline record, no new fields
-            {"contract": tag, "attempt": 1, "verdict": "progress", "metric": 5.0, "action": "continue"},
-            {"contract": tag, "attempt": 2, "verdict": "progress", "metric": 6.0, "action": "continue"},
-        ])
         contract = {
             "goal": {"direction": "increase", "mode": "improve"},
             "maker": {"command": f"{PY} inc.py"},
@@ -285,9 +295,17 @@ def test_improve_legacy_baseline() -> None:
         }
         cpath = root / tag
         cpath.write_text(json.dumps(contract), encoding="utf-8")
-        assert run_contract(cpath, root) == "IMPROVED", \
-            "legacy ledger 5 -> 7 must read as improvement, not UNRESOLVED"
-    print("legacy ok    (improve mode falls back to earliest metric as baseline)")
+        _write_state(state, [    # prior durable records with current identity
+            {"contract": tag, "attempt": 1, "verdict": "progress", "metric": 5.0, "action": "continue"},
+            {"contract": tag, "attempt": 2, "verdict": "progress", "metric": 6.0, "action": "continue"},
+        ], cpath, contract)
+        try:
+            run_contract(cpath, root)
+        except SystemExit as exc:
+            assert "no durable attempt-0 baseline" in str(exc)
+        else:
+            raise AssertionError("legacy improve ledger must be refused")
+    print("legacy ok    (improve ledger without baseline is refused)")
 
 
 def test_resume_drops_unscored_metric() -> None:
@@ -299,11 +317,6 @@ def test_resume_drops_unscored_metric() -> None:
         (root / "n.txt").write_text("5", encoding="utf-8")
         tag = "unscored.json"
         state = root / "state.jsonl"
-        _write_state(state, [
-            {"contract": tag, "attempt": 0, "verdict": "baseline", "metric": 5.0, "action": "none"},
-            {"contract": tag, "attempt": 1, "verdict": "unknown", "metric": 99.0,
-             "action": "continue", "success_exit": 124},   # hung checker's untrusted reading
-        ])
         contract = {
             "goal": {"direction": "increase", "mode": "improve"},
             "maker": {"command": f'{PY} -c "pass"'},       # changes nothing
@@ -313,6 +326,11 @@ def test_resume_drops_unscored_metric() -> None:
         }
         cpath = root / tag
         cpath.write_text(json.dumps(contract), encoding="utf-8")
+        _write_state(state, [
+            {"contract": tag, "attempt": 0, "verdict": "baseline", "metric": 5.0, "action": "none"},
+            {"contract": tag, "attempt": 1, "verdict": "unknown", "metric": 99.0,
+             "action": "continue", "success_exit": 124},   # hung checker's untrusted reading
+        ], cpath, contract)
         assert run_contract(cpath, root) == "UNRESOLVED", \
             "unscored 99.0 must not resurrect as best on resume (false IMPROVED)"
     print("unscored ok  (resume drops unknown/tampered metrics from the incumbent)")
@@ -377,6 +395,7 @@ def test_rollback_failure_escalates() -> None:
             "budget": {"attempts": 3},
             "state": {"file": "state.jsonl"},
             "failure_policy": {"regression": "rollback",
+                               "snapshot_command": f'{PY} -c "pass"',
                                "rollback_command": f'{PY} -c "import sys; sys.exit(1)"'},
         }
         cpath = root / tag
@@ -474,6 +493,190 @@ def test_rollback_restores_incumbent() -> None:
     print("rollback ok  (snapshot on new best; regression restores incumbent; then WON)")
 
 
+def test_snapshot_failure_is_not_an_incumbent() -> None:
+    """A failed candidate checkpoint escalates without changing best state."""
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        _seed_counter(root, win_at=999)
+        (root / "snap.py").write_text(
+            "from pathlib import Path\n"
+            "p=Path('snap_count'); n=int(p.read_text()) if p.exists() else 0\n"
+            "p.write_text(str(n+1))\n"
+            "if n >= 1: raise SystemExit(1)\n", encoding="utf-8")
+        contract = {
+            "goal": {"direction": "increase"},
+            "maker": {"command": f"{PY} inc.py"},
+            "success": {"command": f'{PY} -c "import sys; sys.exit(1)"'},
+            "progress": {"command": f"{PY} metric.py"},
+            "budget": {"attempts": 2},
+            "state": {"file": "state.jsonl"},
+            "failure_policy": {"regression": "rollback",
+                               "snapshot_command": f"{PY} snap.py",
+                               "rollback_command": f"{PY} -c \"pass\""},
+        }
+        cpath = root / "snapfail.json"
+        cpath.write_text(json.dumps(contract), encoding="utf-8")
+        assert run_contract(cpath, root) == "ESCALATE"
+        records = _records(root / "state.jsonl", cpath.name)
+        failed = records[-1]
+        assert failed["snapshot_status"] == "failed"
+        assert failed["incumbent"] is False
+        assert failed["verdict"] == "unknown"
+        assert failed["best"] == 0.0
+    print("snapshot failure ok (candidate not admitted; escalates)")
+
+
+def test_terminal_resume_is_sticky() -> None:
+    """An escalated unknown is durable and never reruns the maker on resume."""
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        (root / "maker.py").write_text(
+            "from pathlib import Path\n"
+            "p=Path('maker_runs'); p.write_text(str(int(p.read_text()) + 1) if p.exists() else '1')\n",
+            encoding="utf-8")
+        contract = {
+            "maker": {"command": f"{PY} maker.py"},
+            "success": {"command": f'{PY} -c "import sys; sys.exit(1)"'},
+            "budget": {"attempts": 2},
+            "state": {"file": "state.jsonl"},
+        }
+        cpath = root / "terminal.json"
+        cpath.write_text(json.dumps(contract), encoding="utf-8")
+        assert run_contract(cpath, root) == "ESCALATE"
+        assert (root / "maker_runs").read_text() == "1"
+        assert run_contract(cpath, root) == "ESCALATE"
+        assert (root / "maker_runs").read_text() == "1"
+        terminal_records = [r for r in _records(root / "state.jsonl", cpath.name)
+                            if r.get("terminal_result")]
+        assert terminal_records[-1]["terminal_reason"] == "unknown"
+    print("terminal ok   (unknown escalation is sticky across resume)")
+
+
+def test_improve_restores_committed_incumbent() -> None:
+    """IMPROVED returns with the last committed snapshot restored."""
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        (root / "maker.py").write_text(
+            "from pathlib import Path\n"
+            "calls=Path('calls'); n=int(calls.read_text()) if calls.exists() else 0\n"
+            "calls.write_text(str(n+1)); Path('value').write_text('1' if n == 0 else '0')\n",
+            encoding="utf-8")
+        (root / "metric.py").write_text(
+            "from pathlib import Path\n"
+            "print(Path('value').read_text() if Path('value').exists() else '0')\n",
+            encoding="utf-8")
+        (root / "value").write_text("0", encoding="utf-8")
+        (root / "snapshot.py").write_text(
+            "from pathlib import Path\n"
+            "Path('incumbent').write_text(Path('value').read_text())\n",
+            encoding="utf-8")
+        (root / "restore.py").write_text(
+            "from pathlib import Path\n"
+            "Path('value').write_text(Path('incumbent').read_text())\n",
+            encoding="utf-8")
+        contract = {
+            "goal": {"mode": "improve", "direction": "increase"},
+            "maker": {"command": f"{PY} maker.py"},
+            "progress": {"command": f"{PY} metric.py"},
+            "budget": {"attempts": 2},
+            "state": {"file": "state.jsonl"},
+            "failure_policy": {
+                "regression": "continue",
+                "snapshot_command": f"{PY} snapshot.py",
+                "rollback_command": f"{PY} restore.py",
+            },
+        }
+        cpath = root / "improve.json"
+        cpath.write_text(json.dumps(contract), encoding="utf-8")
+        assert run_contract(cpath, root) == "IMPROVED"
+        assert (root / "value").read_text() == "1", \
+            "budget termination must restore the committed best snapshot"
+    print("improve restore ok (budget result leaves committed incumbent active)")
+
+
+def test_resume_identity_and_torn_tail() -> None:
+    """Contract edits are fresh runs; one torn final JSONL line is truncated."""
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        state = root / "state.jsonl"
+        contract = {
+            "success": {"command": f'{PY} -c "import sys; sys.exit(0)"'},
+            "budget": {"attempts": 1},
+            "state": {"file": "state.jsonl"},
+            "failure_policy": {"unknown": "continue"},
+        }
+        cpath = root / "identity.json"
+        cpath.write_text(json.dumps(contract), encoding="utf-8")
+        assert run_contract(cpath, root) == "WON"
+        first_size = state.stat().st_size
+        with state.open("ab") as handle:
+            handle.write(b'{"torn":')
+        # Change the evaluator: old WON must not short-circuit this run.
+        contract["success"] = {"command": f'{PY} -c "import sys; sys.exit(1)"'}
+        cpath.write_text(json.dumps(contract), encoding="utf-8")
+        assert run_contract(cpath, root) == "UNRESOLVED"
+        assert state.stat().st_size > first_size
+        assert b'{"torn":' not in state.read_bytes()
+    print("identity/torn-tail ok (stale WON ignored; tail truncated and resumed)")
+
+
+def test_malformed_earlier_ledger_refuses() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        cpath = root / "bad.json"
+        contract = {"success": {"command": "true"}, "budget": {"attempts": 1},
+                    "state": {"file": "state.jsonl"}}
+        cpath.write_text(json.dumps(contract), encoding="utf-8")
+        state = root / "state.jsonl"
+        state.write_text(json.dumps(_ledger_header()) + "\n"
+                         '{"broken":\n{"valid": true}\n', encoding="utf-8")
+        try:
+            run_contract(cpath, root)
+        except SystemExit as exc:
+            assert "malformed earlier ledger" in str(exc)
+        else:
+            raise AssertionError("malformed earlier ledger line must refuse")
+    print("malformed ledger ok (earlier corruption refuses explicitly)")
+
+
+def test_validator_contract_shape_and_defaults() -> None:
+    """The shared validator covers the strict canonical contract shape."""
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        protected = root / "judge.py"
+        protected.write_text("pass\n", encoding="utf-8")
+        from run import validate_contract
+        contract = {
+            "goal": {"direction": "sideways"},
+            "success": {"command": 3, "timeout_sec": float("inf")},
+            "progress": {"command": "metric", "stagnation_window": 0},
+            "budget": {"attempts": True},
+            "protect": ["judge.py", "missing.py"],
+            "failure_policy": {"regression": "ask", "snapshot_command": "snap",
+                                "unknwon": "continue"},
+            "unexpected": True,
+        }
+        errors = validate_contract(contract, root)
+        assert any("direction" in error for error in errors)
+        assert any("success.command" in error for error in errors)
+        assert any("timeout_sec" in error for error in errors)
+        assert any("stagnation_window" in error for error in errors)
+        assert any("attempts" in error for error in errors)
+        assert any("paired" in error for error in errors)
+        assert any("protect" in error for error in errors)
+        assert any("unknwon" in error for error in errors)
+        assert any("unexpected" in error for error in errors)
+
+        owned_path = root / "state.jsonl"
+        owned_path.write_text("{}\n", encoding="utf-8")
+        owned_contract = {"success": {"command": "check"},
+                          "budget": {"attempts": 1},
+                          "state": {"file": "state.jsonl"}}
+        assert any("owned autohunt ledger" in error
+                   for error in validate_contract(owned_contract, root))
+    print("validator ok (canonical shape/path/action/timeout checks)")
+
+
 # ---- refusal gates ---------------------------------------------------------
 
 def _refuses(contract: dict) -> bool:
@@ -515,6 +718,12 @@ def main() -> int:
     test_improve_mode()
     test_protect_tampered()
     test_rollback_restores_incumbent()
+    test_snapshot_failure_is_not_an_incumbent()
+    test_terminal_resume_is_sticky()
+    test_improve_restores_committed_incumbent()
+    test_resume_identity_and_torn_tail()
+    test_malformed_earlier_ledger_refuses()
+    test_validator_contract_shape_and_defaults()
     test_gates()
     print("test_governor ok")
     return 0

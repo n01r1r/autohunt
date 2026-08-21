@@ -504,11 +504,22 @@ def _best(history: list, direction: str) -> float | None:
     return min(vals) if direction == "decrease" else max(vals)
 
 
-def classify(passed: bool, metric, history: list, direction: str, window: int) -> str:
+def classify(passed: bool, metric, history: list, direction: str, window: int,
+             has_progress: bool = True, has_maker: bool = True) -> str:
     if passed:
         return "won"
     if metric is None:
-        return "unknown"
+        # No finite metric.  Three cases that must not collapse into one:
+        #   * has_progress: a progress command IS configured but yielded no
+        #     number (bad output, crash) -> genuine ambiguity -> unknown.
+        #   * no progress cmd but a maker exists: a success-only retry contract;
+        #     the maker changes state between attempts, so a non-passing attempt
+        #     is just unfinished work -> progress (retry to success or budget).
+        #   * no progress cmd and no maker (a checker-only gate): nothing changes
+        #     on retry, so a failing gate is terminal -> unknown -> escalate.
+        if has_progress:
+            return "unknown"
+        return "progress" if has_maker else "unknown"
     best = _best(history, direction)
     if best is None:
         return "progress"
@@ -734,7 +745,9 @@ def run_contract(contract_path: Path, cwd: Path) -> str:
             if success_exit == TIMEOUT_EXIT:        # hung checker = invalid signal
                 verdict = "unknown"
             else:
-                verdict = classify(passed, metric, history, direction, window)
+                verdict = classify(passed, metric, history, direction, window,
+                                   has_progress=bool(prog_cmd),
+                                   has_maker=bool(maker_cmd))
         default_action = "escalate" if verdict in ("unknown", "tampered") else "continue"
         action = "stop" if verdict == "won" else fp.get(verdict, default_action)
 

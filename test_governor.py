@@ -95,6 +95,16 @@ def test_classify() -> None:
     # the 5 -> 4 -> 4 post-improvement tie: plateau, NOT unknown/escalate
     assert classify(False, 4, [5, 4], "decrease", 3) == "plateau"
     assert classify(False, 4, [5, 4, 4], "decrease", 3) == "stagnation"
+    # success-only contract (no progress command): a non-passing attempt is an
+    # unfinished retry, not an ambiguous signal -> progress (keep going), never
+    # unknown/escalate. A configured progress cmd that yields no number stays
+    # unknown (the default), so the escalation path is not lost.
+    assert classify(False, None, [1], "increase", 2, has_progress=True) == "unknown"
+    assert classify(False, None, [1], "increase", 2, has_progress=False, has_maker=True) == "progress"
+    assert classify(False, None, [], "decrease", 2, has_progress=False, has_maker=True) == "progress"
+    # checker-only gate (no maker, no progress): nothing changes on retry, so a
+    # failing gate is terminal -> unknown -> escalate, NOT an endless retry.
+    assert classify(False, None, [], "decrease", 2, has_progress=False, has_maker=False) == "unknown"
     print("classify ok  (won/progress/regression/stagnation/plateau/unknown, best-based)")
 
 
@@ -109,6 +119,53 @@ def test_numeric_rejects_nonfinite() -> None:
         assert numeric(f"{PY} inf.py", root) is None, "inf must be rejected"
         assert numeric(f"{PY} ok.py", root) == 3.5, "finite line must still parse"
     print("numeric ok   (NaN/inf rejected; finite value parsed)")
+
+
+def test_success_only_retries_to_won() -> None:
+    """maker + success, NO progress command -> retries to WON, never escalates.
+
+    Regression: with the unknown->escalate default, a non-passing attempt in a
+    success-only contract classified as 'unknown' (metric is None because no
+    progress command exists) and escalated at attempt 1 instead of retrying.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        _seed_counter(root, win_at=3)                # passes only at the 3rd maker run
+        tag = "successonly.json"
+        contract = {
+            "maker": {"command": f"{PY} inc.py"},
+            "success": {"command": f"{PY} check.py"},
+            "budget": {"attempts": 5},
+            "state": {"file": "state.jsonl"},
+        }                                            # deliberately no "progress"
+        cpath = root / tag
+        cpath.write_text(json.dumps(contract), encoding="utf-8")
+        assert run_contract(cpath, root) == "WON", \
+            "success-only contract must retry to WON, not escalate at attempt 1"
+    print("success-only ok (no progress cmd retries to WON, no premature escalate)")
+
+
+def test_checker_only_gate_escalates() -> None:
+    """Checker-only contract (no maker, no progress) escalates on a failing gate.
+
+    Nothing changes between attempts, so a failing gate is terminal - hand to a
+    human at once rather than re-running the identical check to no effect. This
+    is the self-evolve gate's contract shape; the success-only retry fix must
+    not turn it into a futile retry loop.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        tag = "gate.json"
+        contract = {
+            "success": {"command": f'{PY} -c "import sys; sys.exit(1)"'},
+            "budget": {"attempts": 3},
+            "state": {"file": "state.jsonl"},
+        }                                            # no maker, no progress
+        cpath = root / tag
+        cpath.write_text(json.dumps(contract), encoding="utf-8")
+        assert run_contract(cpath, root) == "ESCALATE", \
+            "checker-only failing gate must escalate, not retry to UNRESOLVED"
+    print("checker-only ok (no-maker failing gate escalates, not a retry loop)")
 
 
 # ---- resume: the re-verification -------------------------------------------
@@ -534,9 +591,14 @@ def test_terminal_resume_is_sticky() -> None:
             "from pathlib import Path\n"
             "p=Path('maker_runs'); p.write_text(str(int(p.read_text()) + 1) if p.exists() else '1')\n",
             encoding="utf-8")
+        # A progress command IS configured but yields no number -> genuine
+        # ambiguity -> unknown -> escalate (the terminal state under test). A
+        # success-only contract with no progress command would instead retry.
+        (root / "noise.py").write_text("print('not-a-number')", encoding="utf-8")
         contract = {
             "maker": {"command": f"{PY} maker.py"},
             "success": {"command": f'{PY} -c "import sys; sys.exit(1)"'},
+            "progress": {"command": f"{PY} noise.py"},
             "budget": {"attempts": 2},
             "state": {"file": "state.jsonl"},
         }
@@ -705,6 +767,8 @@ def test_gates() -> None:
 def main() -> int:
     test_classify()
     test_numeric_rejects_nonfinite()
+    test_success_only_retries_to_won()
+    test_checker_only_gate_escalates()
     test_resume_continues()
     test_resume_respects_cap()
     test_resume_won_short_circuits()
